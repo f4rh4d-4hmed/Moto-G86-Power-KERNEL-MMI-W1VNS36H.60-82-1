@@ -1,9 +1,18 @@
-name: Kernel Build
+name: Manual Kernel Build
 
+# 1. Manual Dispatch
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
+    inputs:
+      ksu_type:
+        description: 'Select KernelSU Flavor'
+        required: true
+        default: 'none'
+        type: choice
+        options:
+          - 'none'
+          - 'ksu'
+          - 'ksunext'
 
 jobs:
   build:
@@ -13,23 +22,21 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      # 1. Combined all apt dependencies to run exactly once
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential flex libssl-dev libelf-dev clang lld base-files tar xz-utils cpio dwarves
+          sudo apt-get install -y bc bison build-essential flex libssl-dev libelf-dev clang lld base-files tar xz-utils cpio dwarves zip
 
-      # 2. Add ccache action to store compiled object files
       - name: Setup ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
-          key: kernel-ccache-${{ github.ref_name }}-${{ github.sha }}
+          # Adding the ksu_type to the key prevents cache contamination between different KSU states
+          key: kernel-ccache-${{ github.event.inputs.ksu_type }}-${{ github.sha }}
           restore-keys: |
-            kernel-ccache-${{ github.ref_name }}-
+            kernel-ccache-${{ github.event.inputs.ksu_type }}-
             kernel-ccache-
           max-size: 2G
 
-      # 3. Cache the massive Android Clang toolchain folder
       - name: Cache Clang Toolchain
         id: cache-clang
         uses: actions/cache@v4
@@ -38,9 +45,25 @@ jobs:
           key: clang-android14-release
 
       - name: Build kernel
+        env:
+          KSU_TYPE: ${{ github.event.inputs.ksu_type }}
         run: |
           chmod +x build.sh
           ./build.sh
+
+      # 2. Package the compiled image dynamically into AnyKernel3
+      - name: Package with AnyKernel3
+        run: |
+          echo "Cloning AnyKernel3 template..."
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git anykernel
+          rm -rf anykernel/.git anykernel/README.md
+          
+          echo "Injecting compiled kernel Image..."
+          cp arch/arm64/boot/Image anykernel/
+          
+          echo "Creating flashable zip archive..."
+          cd anykernel
+          zip -r9 ../anykernel3-gki-build.zip *
 
       - name: Send to Telegram
         env:
@@ -48,10 +71,12 @@ jobs:
         run: |
           COMMIT=$(git log -1 --pretty=format:"%s (%h)")
           DATE=$(date '+%Y-%m-%d %H:%M UTC')
-          CAPTION=$(printf "Kernel Build Successful\nCommit: %s\nDate: %s" "$COMMIT" "$DATE")
+          KSU_STATUS="${{ github.event.inputs.ksu_type }}"
+          
+          CAPTION=$(printf "Kernel Build Successful\nVariant: %s\nCommit: %s\nDate: %s" "$KSU_STATUS" "$COMMIT" "$DATE")
 
           curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument" \
             -F chat_id="6779570748" \
-            -F document="@arch/arm64/boot/Image" \
+            -F document="@anykernel3-gki-build.zip" \
             -F caption="$CAPTION"
             
