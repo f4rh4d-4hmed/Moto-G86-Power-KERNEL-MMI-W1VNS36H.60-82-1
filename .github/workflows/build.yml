@@ -1,0 +1,39 @@
+name: Kernel Build
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential flex libssl-dev libelf-dev clang lld base-files
+
+      - name: Build kernel
+        run: |
+          chmod +x build.sh
+          ./build.sh
+
+      - name: Send to Telegram
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+        run: |
+          COMMIT=$(git log -1 --pretty=format:"%s (%h)")
+          DATE=$(date '+%Y-%m-%d %H:%M UTC')
+          
+          # Using printf keeps your YAML looking clean without injecting unwanted spaces into Telegram
+          CAPTION=$(printf "Kernel Build Successful\nCommit: %s\nDate: %s" "$COMMIT" "$DATE")
+
+          curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument" \
+            -F chat_id="6779570748" \
+            -F document="@arch/arm64/boot/Image" \
+            -F caption="$CAPTION"
