@@ -13,10 +13,29 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
+      # 1. Combined all apt dependencies to run exactly once
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential flex libssl-dev libelf-dev clang lld base-files
+          sudo apt-get install -y bc bison build-essential flex libssl-dev libelf-dev clang lld base-files tar xz-utils cpio dwarves
+
+      # 2. Add ccache action to store compiled object files
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: kernel-ccache-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            kernel-ccache-${{ github.ref_name }}-
+            kernel-ccache-
+          max-size: 2G
+
+      # 3. Cache the massive Android Clang toolchain folder
+      - name: Cache Clang Toolchain
+        id: cache-clang
+        uses: actions/cache@v4
+        with:
+          path: prebuilts/clang/host/linux-x86
+          key: clang-android14-release
 
       - name: Build kernel
         run: |
@@ -29,11 +48,10 @@ jobs:
         run: |
           COMMIT=$(git log -1 --pretty=format:"%s (%h)")
           DATE=$(date '+%Y-%m-%d %H:%M UTC')
-          
-          # Using printf keeps your YAML looking clean without injecting unwanted spaces into Telegram
           CAPTION=$(printf "Kernel Build Successful\nCommit: %s\nDate: %s" "$COMMIT" "$DATE")
 
           curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument" \
             -F chat_id="6779570748" \
             -F document="@arch/arm64/boot/Image" \
             -F caption="$CAPTION"
+            
