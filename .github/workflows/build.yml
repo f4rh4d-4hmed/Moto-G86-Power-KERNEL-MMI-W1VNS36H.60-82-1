@@ -64,7 +64,10 @@ jobs:
           echo "Creating flashable zip archive..."
           cd anykernel
           zip -r9 ../anykernel3-gki-build.zip *
-
+          
+# Required secret is BOT_TOKEN (collect it from botfather in telegram) and set it repository ssecrets
+# replace the chat_id= with user chat ID from telegram
+# get chat_id from @userinfobot in telegram
       - name: Send to Telegram
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
